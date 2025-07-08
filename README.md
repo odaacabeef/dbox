@@ -2,25 +2,13 @@
 
 Terminal application for working with Dropbox.
 
-Functionality is geared toward musical collaboration.
-
-It's intended to be used in conjunction with the Dropbox web UI as opposed to
-being a replacement for it.
-
 ## Usage
 
-The primary function is browsing files and selectively synchronizing local files
-with Dropbox.
+The primary function is browsing files and selectively downloading them.
 
-The local synchronization path is `~/.dbox/`.
+Download path is hardcoded to `~/.dbox/`.
 
-When browsing, you only see remote files.
-
-Pressing 'u' inside a folder will upload any local files in that directory.
-
-Pressing 'd' will download remote files.
-
-Pressing 's' will synchronize.
+Use ' ' (space) to select files and/or folders and press 'd' to download them.
 
 ## Authentication
 
