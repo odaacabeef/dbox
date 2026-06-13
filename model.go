@@ -37,6 +37,9 @@ type Model struct {
 	width  int
 	height int
 
+	// Help view state
+	showHelp bool
+
 	// Status messages
 	status     string
 	statusTime time.Time
@@ -181,6 +184,10 @@ func (m Model) View() string {
 		return "Loading..."
 	}
 
+	if m.showHelp {
+		return m.renderHelpView()
+	}
+
 	var s strings.Builder
 
 	// Current path
@@ -241,9 +248,21 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.downloading {
 		return m, nil
 	}
+	// When the help view is open, only allow closing it or quitting.
+	if m.showHelp {
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		case "?", "esc":
+			m.showHelp = false
+		}
+		return m, nil
+	}
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
+	case "?":
+		m.showHelp = true
 	case "up", "k":
 		if m.cursor > 0 {
 			m.cursor--
@@ -421,6 +440,83 @@ func (m Model) renderFileList() string {
 		line := fmt.Sprintf("%s %s %s %s", cursor, selected, icon, file.Name)
 		s.WriteString(style.Render(line) + "\n")
 	}
+
+	return s.String()
+}
+
+// renderHelpView renders the help screen listing all key bindings
+func (m Model) renderHelpView() string {
+	var s strings.Builder
+
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("63"))
+	keyStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("156"))
+	descStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240"))
+
+	type binding struct {
+		keys string
+		desc string
+	}
+	sections := []struct {
+		title    string
+		bindings []binding
+	}{
+		{
+			title: "Navigation",
+			bindings: []binding{
+				{"up / k", "move up"},
+				{"down / j", "move down"},
+				{"g", "jump to top"},
+				{"G", "jump to bottom"},
+				{"ctrl+u", "move up 5 items"},
+				{"ctrl+d", "move down 5 items"},
+				{"enter", "open folder"},
+				{"esc", "go to parent folder"},
+			},
+		},
+		{
+			title: "Files",
+			bindings: []binding{
+				{"space", "toggle selection"},
+				{"d", "download selected files"},
+				{"b", "open current folder in browser"},
+			},
+		},
+		{
+			title: "General",
+			bindings: []binding{
+				{"R", "refresh current folder"},
+				{"C", "clear folder cache"},
+				{"?", "toggle this help"},
+				{"q / ctrl+c", "quit"},
+			},
+		},
+	}
+
+	// Find the widest key string so descriptions line up in a column.
+	keyWidth := 0
+	for _, section := range sections {
+		for _, b := range section.bindings {
+			if len(b.keys) > keyWidth {
+				keyWidth = len(b.keys)
+			}
+		}
+	}
+
+	s.WriteString(titleStyle.Render("dbox — help") + "\n\n")
+	for _, section := range sections {
+		s.WriteString(titleStyle.Render(section.title) + "\n")
+		for _, b := range section.bindings {
+			key := keyStyle.Render(fmt.Sprintf("%-*s", keyWidth, b.keys))
+			s.WriteString("  " + key + "  " + descStyle.Render(b.desc) + "\n")
+		}
+		s.WriteString("\n")
+	}
+	s.WriteString(descStyle.Render("press ? or esc to close") + "\n")
 
 	return s.String()
 }
