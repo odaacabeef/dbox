@@ -83,9 +83,9 @@ func initialManageModel(config *Config, dbox *DboxConfig, cwd string) ManageMode
 	case len(m.files) == 0:
 		m.status = fmt.Sprintf("no files matching %s in %s", strings.Join(dbox.FileTypes, ", "), cwd)
 	case len(dbox.Collaborators) > 0:
-		m.status = "collaborator management not yet implemented; press u to push files"
+		m.status = "collaborator management not yet implemented; press P to push files"
 	default:
-		m.status = "press u to push files"
+		m.status = "press P to push files"
 	}
 
 	return m
@@ -210,7 +210,7 @@ func (m ManageModel) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor = 0
 		m.status = fmt.Sprintf("rescanned: %d file(s)", len(files))
 		m.statusTime = time.Now()
-	case "u", "enter":
+	case "P":
 		if len(m.files) == 0 {
 			return m, func() tea.Msg { return StatusMsg{Message: "nothing to push"} }
 		}
@@ -360,7 +360,7 @@ func (m ManageModel) renderHelpView() string {
 		{
 			title: "Actions",
 			bindings: []binding{
-				{"u / enter", "push files to Dropbox"},
+				{"P", "push files to Dropbox"},
 				{"R", "rescan the local folder"},
 			},
 		},

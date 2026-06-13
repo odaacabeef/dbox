@@ -101,7 +101,7 @@ file_types: [wav]                    # only files with these extensions are push
 On launch, `dbox` lists the matching files in the current directory and its
 subdirectories (hidden files and hidden directories are ignored). The directory
 layout is preserved, so a local `drums/kick.wav` is uploaded to
-`<remote>/drums/kick.wav`. Press `u` to push them. For each file:
+`<remote>/drums/kick.wav`. Press `P` to push them. For each file:
 
 - If the same content already exists at the remote path it is **skipped** —
   comparison uses Dropbox's content hash, so re-running only uploads what
@@ -117,7 +117,7 @@ The remote folder is created if it doesn't already exist.
 | `down` / `j` | Move down |
 | `g` | Jump to top |
 | `G` | Jump to bottom |
-| `u` / `enter` | Push files to Dropbox |
+| `P` | Push files to Dropbox |
 | `R` | Rescan the local folder |
 | `?` | Toggle help |
 | `q` / `ctrl+c` | Quit |
