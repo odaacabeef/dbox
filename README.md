@@ -96,7 +96,7 @@ The config file describes where files go and which ones to include:
 
 ```yaml
 # dbox.yaml
-remote: /sequences/airy-dissonance   # remote Dropbox folder (created if needed)
+remote: /sequences/cool-song         # remote Dropbox folder (created if needed)
 file_types: [wav]                    # only files with these extensions are pushed
 collaborators:                       # optional; see "Collaborators" below
   - alice@example.com
