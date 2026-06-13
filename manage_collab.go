@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -26,12 +25,14 @@ const (
 // creates or shares the folder.
 func loadCollaboratorsCmd(cfg *DboxConfig) tea.Cmd {
 	return func() tea.Msg {
-		token := os.Getenv("DROPBOX_ACCESS_TOKEN")
-		if token == "" {
-			return ErrorMsg{Error: "DROPBOX_ACCESS_TOKEN environment variable not set"}
+		fc, err := newFilesClient()
+		if err != nil {
+			return ErrorMsg{Error: err.Error()}
 		}
-		fc := files.New(dropbox.Config{Token: token})
-		sc := sharing.New(dropbox.Config{Token: token})
+		sc, err := newSharingClient()
+		if err != nil {
+			return ErrorMsg{Error: err.Error()}
+		}
 
 		id, shared, err := resolveSharedFolderID(fc, sc, cfg.Remote, false)
 		if err != nil {
@@ -61,12 +62,14 @@ func loadCollaboratorsCmd(cfg *DboxConfig) tea.Cmd {
 // owner is never removed.
 func reconcileCollaboratorsCmd(cfg *DboxConfig) tea.Cmd {
 	return func() tea.Msg {
-		token := os.Getenv("DROPBOX_ACCESS_TOKEN")
-		if token == "" {
-			return ErrorMsg{Error: "DROPBOX_ACCESS_TOKEN environment variable not set"}
+		fc, err := newFilesClient()
+		if err != nil {
+			return ErrorMsg{Error: err.Error()}
 		}
-		fc := files.New(dropbox.Config{Token: token})
-		sc := sharing.New(dropbox.Config{Token: token})
+		sc, err := newSharingClient()
+		if err != nil {
+			return ErrorMsg{Error: err.Error()}
+		}
 
 		if err := ensureRemoteFolder(fc, cfg.Remote); err != nil {
 			return ErrorMsg{Error: fmt.Sprintf("Failed to create remote folder %s: %v", cfg.Remote, err)}

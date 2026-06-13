@@ -81,11 +81,10 @@ func scanLocalFiles(cwd string, cfg *DboxConfig) ([]ManageFileItem, error) {
 // read-only (only GetMetadata + local hashing).
 func checkSyncStatusCmd(cfg *DboxConfig, items []ManageFileItem) tea.Cmd {
 	return func() tea.Msg {
-		token := os.Getenv("DROPBOX_ACCESS_TOKEN")
-		if token == "" {
-			return ErrorMsg{Error: "DROPBOX_ACCESS_TOKEN environment variable not set"}
+		dbx, err := newFilesClient()
+		if err != nil {
+			return ErrorMsg{Error: err.Error()}
 		}
-		dbx := files.New(dropbox.Config{Token: token})
 
 		statuses := make(map[string]UploadStatus, len(items))
 		errs := make(map[string]string)
@@ -175,11 +174,10 @@ func remoteFileState(dbx files.Client, localPath, remotePath string, localSize i
 // the whole batch runs synchronously and reports a single completion message.
 func pushFilesCmd(cfg *DboxConfig, items []ManageFileItem) tea.Cmd {
 	return func() tea.Msg {
-		token := os.Getenv("DROPBOX_ACCESS_TOKEN")
-		if token == "" {
-			return ErrorMsg{Error: "DROPBOX_ACCESS_TOKEN environment variable not set"}
+		dbx, err := newFilesClient()
+		if err != nil {
+			return ErrorMsg{Error: err.Error()}
 		}
-		dbx := files.New(dropbox.Config{Token: token})
 
 		if err := ensureRemoteFolder(dbx, cfg.Remote); err != nil {
 			return ErrorMsg{Error: fmt.Sprintf("Failed to create remote folder %s: %v", cfg.Remote, err)}

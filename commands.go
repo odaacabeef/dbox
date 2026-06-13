@@ -10,23 +10,16 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/dropbox/dropbox-sdk-go-unofficial/v6/dropbox"
 	"github.com/dropbox/dropbox-sdk-go-unofficial/v6/dropbox/files"
 )
 
 // loadFilesCmd returns a command that loads files from Dropbox
 func loadFilesCmd(path string) tea.Cmd {
 	return func() tea.Msg {
-		// Get access token from environment
-		accessToken := os.Getenv("DROPBOX_ACCESS_TOKEN")
-		if accessToken == "" {
-			return ErrorMsg{Error: "DROPBOX_ACCESS_TOKEN environment variable not set"}
+		dbx, err := newFilesClient()
+		if err != nil {
+			return ErrorMsg{Error: err.Error()}
 		}
-
-		// Create Dropbox client
-		dbx := files.New(dropbox.Config{
-			Token: accessToken,
-		})
 
 		// List files in the specified path
 		arg := files.NewListFolderArg(path)
@@ -93,16 +86,10 @@ func loadFilesCmd(path string) tea.Cmd {
 // downloadFileCmd returns a command that downloads a file from Dropbox
 func downloadFileCmd(path string, localPath string) tea.Cmd {
 	return func() tea.Msg {
-		// Get access token from environment
-		accessToken := os.Getenv("DROPBOX_ACCESS_TOKEN")
-		if accessToken == "" {
-			return ErrorMsg{Error: "DROPBOX_ACCESS_TOKEN environment variable not set"}
+		dbx, err := newFilesClient()
+		if err != nil {
+			return ErrorMsg{Error: err.Error()}
 		}
-
-		// Create Dropbox client for files API
-		dbx := files.New(dropbox.Config{
-			Token: accessToken,
-		})
 
 		// Download file
 		arg := files.NewDownloadArg(path)
@@ -131,15 +118,10 @@ func downloadFileCmd(path string, localPath string) tea.Cmd {
 // downloadFilesCmd returns a command that downloads multiple files and folders
 func downloadFilesCmd(fileItems []FileItem, config *Config) tea.Cmd {
 	return func() tea.Msg {
-		// Synchronously download files
-		accessToken := os.Getenv("DROPBOX_ACCESS_TOKEN")
-		if accessToken == "" {
-			return ErrorMsg{Error: "DROPBOX_ACCESS_TOKEN environment variable not set"}
+		dbx, err := newFilesClient()
+		if err != nil {
+			return ErrorMsg{Error: err.Error()}
 		}
-
-		dbx := files.New(dropbox.Config{
-			Token: accessToken,
-		})
 
 		downloadDir := config.DownloadPath
 		var downloaded, skipped, errors []string
