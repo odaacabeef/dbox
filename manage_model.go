@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ const (
 	StatusUploaded                     // uploaded during this session
 	StatusSkipped                      // skipped during a push (unchanged)
 	StatusError
+	StatusRemoteOnly // present on the remote, no local counterpart
 )
 
 // ManageFileItem is a local file considered for upload.
@@ -40,10 +42,12 @@ type UploadCompleteMsg struct {
 }
 
 // SyncStatusMsg carries each file's launch-time sync state, keyed by relative
-// path. Errors holds the message for any file whose check failed.
+// path. Errors holds the message for any file whose check failed. RemoteOnly
+// lists files on the remote that have no local counterpart.
 type SyncStatusMsg struct {
-	Statuses map[string]UploadStatus
-	Errors   map[string]string
+	Statuses   map[string]UploadStatus
+	Errors     map[string]string
+	RemoteOnly []ManageFileItem
 }
 
 // CollabStatus is the sync state of a collaborator relative to the config.
@@ -83,7 +87,7 @@ type ManageModel struct {
 	dbox   *DboxConfig
 	cwd    string
 
-	files  []ManageFileItem
+	files  []ManageFileItem // local files plus remote-only entries, sorted by Rel
 	cursor int
 
 	width  int
@@ -187,16 +191,31 @@ func (m ManageModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusTime = time.Now()
 		return m, nil
 	case SyncStatusMsg:
-		for i := range m.files {
-			// Only resolve files still awaiting their status, so a late result
+		var merged []ManageFileItem
+		for _, f := range m.files {
+			if f.Status == StatusRemoteOnly {
+				continue // drop stale remote-only entries; refreshed below
+			}
+			// Only resolve files still awaiting a status, so a late result
 			// never clobbers post-push state.
-			if m.files[i].Status != StatusChecking {
-				continue
+			if f.Status == StatusChecking {
+				if st, ok := msg.Statuses[f.Rel]; ok {
+					f.Status = st
+					f.Err = msg.Errors[f.Rel]
+				}
 			}
-			if st, ok := msg.Statuses[m.files[i].Rel]; ok {
-				m.files[i].Status = st
-				m.files[i].Err = msg.Errors[m.files[i].Rel]
-			}
+			merged = append(merged, f)
+		}
+		merged = append(merged, msg.RemoteOnly...)
+		sort.Slice(merged, func(i, j int) bool {
+			return strings.ToLower(merged[i].Rel) < strings.ToLower(merged[j].Rel)
+		})
+		m.files = merged
+		if m.cursor >= len(m.files) {
+			m.cursor = len(m.files) - 1
+		}
+		if m.cursor < 0 {
+			m.cursor = 0
 		}
 		return m, nil
 	case CollaboratorsLoadedMsg:
@@ -310,11 +329,12 @@ func (m ManageModel) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, checkSyncStatusCmd(m.dbox, files)
 		}
 	case "P":
-		if len(m.files) == 0 {
+		local := pushableFiles(m.files)
+		if len(local) == 0 {
 			return m, func() tea.Msg { return StatusMsg{Message: "nothing to push"} }
 		}
 		m.pushing = true
-		return m, pushFilesCmd(m.dbox, m.files)
+		return m, pushFilesCmd(m.dbox, local)
 	case "C":
 		if !m.managesCollaborators() {
 			return m, func() tea.Msg { return StatusMsg{Message: "no collaborators configured"} }
@@ -415,6 +435,18 @@ func (m ManageModel) renderFileList() string {
 	return s.String()
 }
 
+// pushableFiles returns only the local files, excluding remote-only entries
+// (which have no local file to upload).
+func pushableFiles(items []ManageFileItem) []ManageFileItem {
+	var out []ManageFileItem
+	for _, f := range items {
+		if f.Status != StatusRemoteOnly {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // renderCollaborators renders the collaborator diff section.
 func (m ManageModel) renderCollaborators() string {
 	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
@@ -472,6 +504,8 @@ func statusLabel(file ManageFileItem) (string, string) {
 		return "✓ uploaded", "156"
 	case StatusSkipped:
 		return "↷ skipped (unchanged)", "156"
+	case StatusRemoteOnly:
+		return "remote only", "240"
 	case StatusError:
 		msg := file.Err
 		if msg == "" {

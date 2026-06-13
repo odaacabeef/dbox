@@ -110,7 +110,10 @@ layout is preserved, so a local `drums/kick.wav` is uploaded to
 
 Each file is checked against the remote and shows its sync state: `✓ in sync`
 (already uploaded, identical), `● modified` (on the remote but changed locally),
-or `new` (not on the remote yet). Press `P` to push them. For each file:
+or `new` (not on the remote yet). Files of the configured types that exist on
+the remote but not locally appear in the list in gray as `remote only`; they're
+shown for awareness and are never part of a push. The list is sorted
+alphabetically. Press `P` to push the local files. For each file:
 
 - If the same content already exists at the remote path it is **skipped** —
   comparison uses Dropbox's content hash, so re-running only uploads what

@@ -89,7 +89,9 @@ func checkSyncStatusCmd(cfg *DboxConfig, items []ManageFileItem) tea.Cmd {
 
 		statuses := make(map[string]UploadStatus, len(items))
 		errs := make(map[string]string)
+		localRel := make(map[string]bool, len(items))
 		for _, item := range items {
+			localRel[strings.ToLower(item.Rel)] = true
 			remotePath := cfg.Remote + "/" + item.Rel
 			st, err := remoteFileState(dbx, item.Path, remotePath, item.Size)
 			if err != nil {
@@ -98,8 +100,44 @@ func checkSyncStatusCmd(cfg *DboxConfig, items []ManageFileItem) tea.Cmd {
 			}
 			statuses[item.Rel] = st
 		}
-		return SyncStatusMsg{Statuses: statuses, Errors: errs}
+
+		return SyncStatusMsg{
+			Statuses:   statuses,
+			Errors:     errs,
+			RemoteOnly: remoteOnlyFiles(dbx, cfg, localRel),
+		}
 	}
+}
+
+// remoteOnlyFiles lists files in the remote folder (of the configured types)
+// that have no local counterpart. Comparison is case-insensitive, matching
+// Dropbox. Returns nil if the remote folder doesn't exist yet.
+func remoteOnlyFiles(dbx files.Client, cfg *DboxConfig, localRel map[string]bool) []ManageFileItem {
+	remoteFiles, err := getAllFilesInFolder(dbx, cfg.Remote)
+	if err != nil {
+		return nil
+	}
+	prefix := strings.ToLower(cfg.Remote + "/")
+
+	var out []ManageFileItem
+	for _, rf := range remoteFiles {
+		if rf.IsFolder || !cfg.matchesFileType(rf.Name) {
+			continue
+		}
+		// rf.Path is the lowercased Dropbox path; derive the path relative to
+		// the managed folder so it lines up with local files' Rel.
+		rel := strings.TrimPrefix(rf.Path, prefix)
+		if localRel[strings.ToLower(rel)] {
+			continue // also present locally
+		}
+		out = append(out, ManageFileItem{
+			Rel:    rel,
+			Size:   rf.Size,
+			Status: StatusRemoteOnly,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Rel < out[j].Rel })
+	return out
 }
 
 // remoteFileState compares a local file against its remote counterpart and
