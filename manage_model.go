@@ -21,7 +21,7 @@ const (
 
 // ManageFileItem is a local file considered for upload.
 type ManageFileItem struct {
-	Name   string
+	Rel    string // path relative to cwd, slash-separated (also the display name)
 	Path   string // absolute local path
 	Size   int64
 	Status UploadStatus
@@ -129,28 +129,28 @@ func (m ManageModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *ManageModel) applyResults(msg UploadCompleteMsg) {
 	uploaded := toSet(msg.Uploaded)
 	skipped := toSet(msg.Skipped)
-	// Error entries are "name: message"; index the message by name.
-	errByName := make(map[string]string)
+	// Error entries are "<rel>: message"; index the message by relative path.
+	errByRel := make(map[string]string)
 	for _, e := range msg.Errors {
-		name := e
+		rel := e
 		if i := strings.Index(e, ":"); i >= 0 {
-			name = e[:i]
+			rel = e[:i]
 		}
-		errByName[name] = e
+		errByRel[rel] = e
 	}
 
 	for i := range m.files {
-		name := m.files[i].Name
+		rel := m.files[i].Rel
 		switch {
-		case uploaded[name]:
+		case uploaded[rel]:
 			m.files[i].Status = StatusUploaded
 			m.files[i].Err = ""
-		case skipped[name]:
+		case skipped[rel]:
 			m.files[i].Status = StatusSkipped
 			m.files[i].Err = ""
-		case errByName[name] != "":
+		case errByRel[rel] != "":
 			m.files[i].Status = StatusError
-			m.files[i].Err = errByName[name]
+			m.files[i].Err = errByRel[rel]
 		}
 	}
 }
@@ -293,7 +293,7 @@ func (m ManageModel) renderFileList() string {
 			}
 		}
 
-		line := fmt.Sprintf("%s 📄 %-30s %10s   %s", cursor, file.Name, humanizeSize(file.Size), status)
+		line := fmt.Sprintf("%s 📄 %-40s %10s   %s", cursor, file.Rel, humanizeSize(file.Size), status)
 		s.WriteString(style.Render(line) + "\n")
 	}
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -25,40 +26,52 @@ const (
 	uploadChunkSize = 16 * 1024 * 1024 // 16 MB
 )
 
-// scanLocalFiles returns the top-level files in cwd that match the configured
-// file types, sorted by name. Subdirectories and hidden files are skipped.
+// scanLocalFiles walks cwd recursively and returns the files that match the
+// configured file types, sorted by their path relative to cwd. Hidden files
+// and hidden directories are skipped. Each file's relative path is preserved so
+// the remote layout mirrors the local one.
 func scanLocalFiles(cwd string, cfg *DboxConfig) ([]ManageFileItem, error) {
-	entries, err := os.ReadDir(cwd)
+	var items []ManageFileItem
+
+	err := filepath.WalkDir(cwd, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			// Skip hidden directories and their contents, but never cwd itself.
+			if path != cwd && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			return nil // skip hidden files
+		}
+		if !cfg.matchesFileType(d.Name()) {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil // skip files we can't stat
+		}
+		rel, err := filepath.Rel(cwd, path)
+		if err != nil {
+			return nil
+		}
+		items = append(items, ManageFileItem{
+			Rel:    filepath.ToSlash(rel),
+			Path:   path,
+			Size:   info.Size(),
+			Status: StatusPending,
+		})
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	var items []ManageFileItem
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if strings.HasPrefix(name, ".") {
-			continue // skip hidden files
-		}
-		if !cfg.matchesFileType(name) {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		items = append(items, ManageFileItem{
-			Name:   name,
-			Path:   filepath.Join(cwd, name),
-			Size:   info.Size(),
-			Status: StatusPending,
-		})
-	}
-
 	sort.Slice(items, func(i, j int) bool {
-		return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
+		return strings.ToLower(items[i].Rel) < strings.ToLower(items[j].Rel)
 	})
 	return items, nil
 }
@@ -82,11 +95,11 @@ func pushFilesCmd(cfg *DboxConfig, items []ManageFileItem) tea.Cmd {
 
 		for _, item := range items {
 			// Dropbox paths are always "/"-separated and are not OS paths.
-			remotePath := cfg.Remote + "/" + item.Name
+			remotePath := cfg.Remote + "/" + item.Rel
 
 			localHash, err := dropboxContentHash(item.Path)
 			if err != nil {
-				errs = append(errs, fmt.Sprintf("%s: hashing failed: %v", item.Name, err))
+				errs = append(errs, fmt.Sprintf("%s: hashing failed: %v", item.Rel, err))
 				continue
 			}
 
@@ -94,13 +107,13 @@ func pushFilesCmd(cfg *DboxConfig, items []ManageFileItem) tea.Cmd {
 			meta, err := dbx.GetMetadata(files.NewGetMetadataArg(remotePath))
 			if err != nil {
 				if !isNotFoundErr(err) {
-					errs = append(errs, fmt.Sprintf("%s: lookup failed: %v", item.Name, err))
+					errs = append(errs, fmt.Sprintf("%s: lookup failed: %v", item.Rel, err))
 					continue
 				}
 				// not found: fall through and upload as a new file
 			} else if fileMeta, ok := meta.(*files.FileMetadata); ok {
 				if fileMeta.ContentHash == localHash {
-					skipped = append(skipped, item.Name)
+					skipped = append(skipped, item.Rel)
 					continue
 				}
 			}
@@ -111,10 +124,10 @@ func pushFilesCmd(cfg *DboxConfig, items []ManageFileItem) tea.Cmd {
 				err = uploadFile(dbx, item.Path, remotePath, localHash)
 			}
 			if err != nil {
-				errs = append(errs, fmt.Sprintf("%s: %v", item.Name, err))
+				errs = append(errs, fmt.Sprintf("%s: %v", item.Rel, err))
 				continue
 			}
-			uploaded = append(uploaded, item.Name)
+			uploaded = append(uploaded, item.Rel)
 		}
 
 		return UploadCompleteMsg{Uploaded: uploaded, Skipped: skipped, Errors: errs}
