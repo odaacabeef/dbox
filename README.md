@@ -28,28 +28,45 @@ go build -o dbox .
 
 ## Authentication
 
-`dbox` reads your Dropbox access token from the `DROPBOX_ACCESS_TOKEN`
-environment variable:
+`dbox` authenticates with Dropbox via OAuth and reads its credentials from three
+environment variables — `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, and
+`DROPBOX_REFRESH_TOKEN`. The refresh token is long-lived, so once it's set the
+app renews access automatically with nothing to regenerate. `dbox` writes
+nothing to disk, so you can keep the credentials in an encrypted store.
+
+### One-time setup
+
+1. Create an app at https://www.dropbox.com/developers/apps.
+2. Under **Settings**, note the **App key** and **App secret**, and add a
+   **Redirect URI** of `http://localhost:53682/`.
+3. Under **Permissions**, enable the scopes you need, then save:
+   - Browse / download: `files.metadata.read`, `files.content.read`
+   - Push: also `files.content.write`
+   - Collaborators: also `sharing.read`, `sharing.write`
+4. Run `dbox login` to obtain a refresh token. It opens your browser to
+   authorize the app, then prints sourceable exports to stdout (status messages
+   go to stderr, so stdout stays clean to pipe or capture):
+
+   ```sh
+   export DROPBOX_APP_KEY="..."     # from the app's Settings
+   export DROPBOX_APP_SECRET="..."  # from the app's Settings
+   dbox login
+   # ->
+   # export DROPBOX_APP_KEY='...'
+   # export DROPBOX_APP_SECRET='...'
+   # export DROPBOX_REFRESH_TOKEN='...'
+   ```
+
+### Running
+
+Store those exports wherever you keep secrets and source them before running
+`dbox`. For example, with [`pass`](https://www.passwordstore.org/):
 
 ```sh
-export DROPBOX_ACCESS_TOKEN="..."
+dbox login | pass insert -m -e Dev/dropbox/export/odaacabeef-dbox   # save once
+. <(pass Dev/dropbox/export/odaacabeef-dbox)                        # each session
+dbox                                                                # or: dbox dbox.yaml
 ```
-
-To obtain a token, create an app at
-https://www.dropbox.com/developers/apps, then under the app's **Settings** use
-**Generated access token → Generate**.
-
-Make sure the token has the scopes the mode you're using needs (set these under
-the app's **Permissions** tab, then regenerate the token):
-
-| Mode | Required scopes |
-| --- | --- |
-| Browse / download | `files.metadata.read`, `files.content.read` |
-| Management (push) | the above plus `files.content.write` |
-| Management (collaborators) | the above plus `sharing.read`, `sharing.write` |
-
-A read-only token works for browsing but will fail when pushing or managing
-collaborators.
 
 ## Browse mode
 

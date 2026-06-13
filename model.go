@@ -3,9 +3,7 @@ package main
 import (
 	"fmt"
 	"net/url"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -356,23 +354,9 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		// Open the URL in the default browser
 		return m, func() tea.Msg {
-			// Use the system's default browser to open the URL
-			var cmd *exec.Cmd
-			switch runtime.GOOS {
-			case "darwin":
-				cmd = exec.Command("open", dropboxURL)
-			case "linux":
-				cmd = exec.Command("xdg-open", dropboxURL)
-			case "windows":
-				cmd = exec.Command("cmd", "/c", "start", dropboxURL)
-			default:
-				return StatusMsg{Message: "Cannot open browser on this platform"}
-			}
-
-			if err := cmd.Start(); err != nil {
+			if err := openBrowser(dropboxURL); err != nil {
 				return StatusMsg{Message: fmt.Sprintf("Failed to open browser: %v", err)}
 			}
-
 			return StatusMsg{Message: fmt.Sprintf("Opened %s in browser", webPath)}
 		}
 	case "d":

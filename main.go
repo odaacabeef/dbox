@@ -8,10 +8,24 @@ import (
 )
 
 func main() {
-	// Load configuration (the access token is required in both modes).
+	// `dbox login` runs the one-time OAuth flow and exits.
+	if len(os.Args) >= 2 && os.Args[1] == "login" {
+		if err := runLogin(); err != nil {
+			fmt.Printf("Login failed: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	config, err := LoadConfig()
 	if err != nil {
 		fmt.Printf("Configuration error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// All other modes need credentials in the environment.
+	if _, _, _, err := credentials(); err != nil {
+		fmt.Println(err)
 		os.Exit(1)
 	}
 

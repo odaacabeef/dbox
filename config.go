@@ -1,36 +1,23 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 )
 
 // Config holds application configuration
 type Config struct {
-	DropboxAccessToken string
-	DownloadPath       string
+	DownloadPath string
 }
 
-// LoadConfig loads configuration from environment variables and files
+// LoadConfig loads configuration. Dropbox credentials are handled separately
+// (see auth.go); this just resolves filesystem settings.
 func LoadConfig() (*Config, error) {
-
 	dlpath, err := getDefaultDownloadPath()
 	if err != nil {
 		return nil, err
 	}
-
-	config := &Config{
-		DropboxAccessToken: os.Getenv("DROPBOX_ACCESS_TOKEN"),
-		DownloadPath:       dlpath,
-	}
-
-	// Validate required configuration
-	if config.DropboxAccessToken == "" {
-		return nil, fmt.Errorf("DROPBOX_ACCESS_TOKEN environment variable is required")
-	}
-
-	return config, nil
+	return &Config{DownloadPath: dlpath}, nil
 }
 
 // getDefaultDownloadPath returns the default download path
