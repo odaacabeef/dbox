@@ -106,7 +106,11 @@ collaborators:                       # optional; see "Collaborators" below
 On launch, `dbox` lists the matching files in the current directory and its
 subdirectories (hidden files and hidden directories are ignored). The directory
 layout is preserved, so a local `drums/kick.wav` is uploaded to
-`<remote>/drums/kick.wav`. Press `P` to push them. For each file:
+`<remote>/drums/kick.wav`.
+
+Each file is checked against the remote and shows its sync state: `✓ in sync`
+(already uploaded, identical), `● modified` (on the remote but changed locally),
+or `new` (not on the remote yet). Press `P` to push them. For each file:
 
 - If the same content already exists at the remote path it is **skipped** —
   comparison uses Dropbox's content hash, so re-running only uploads what

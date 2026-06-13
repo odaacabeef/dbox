@@ -62,7 +62,7 @@ func scanLocalFiles(cwd string, cfg *DboxConfig) ([]ManageFileItem, error) {
 			Rel:    filepath.ToSlash(rel),
 			Path:   path,
 			Size:   info.Size(),
-			Status: StatusPending,
+			Status: StatusChecking,
 		})
 		return nil
 	})
@@ -74,6 +74,62 @@ func scanLocalFiles(cwd string, cfg *DboxConfig) ([]ManageFileItem, error) {
 		return strings.ToLower(items[i].Rel) < strings.ToLower(items[j].Rel)
 	})
 	return items, nil
+}
+
+// checkSyncStatusCmd determines each file's sync state relative to the remote
+// folder so the list reflects what's already uploaded on launch. It is
+// read-only (only GetMetadata + local hashing).
+func checkSyncStatusCmd(cfg *DboxConfig, items []ManageFileItem) tea.Cmd {
+	return func() tea.Msg {
+		token := os.Getenv("DROPBOX_ACCESS_TOKEN")
+		if token == "" {
+			return ErrorMsg{Error: "DROPBOX_ACCESS_TOKEN environment variable not set"}
+		}
+		dbx := files.New(dropbox.Config{Token: token})
+
+		statuses := make(map[string]UploadStatus, len(items))
+		errs := make(map[string]string)
+		for _, item := range items {
+			remotePath := cfg.Remote + "/" + item.Rel
+			st, err := remoteFileState(dbx, item.Path, remotePath, item.Size)
+			if err != nil {
+				st = StatusError
+				errs[item.Rel] = err.Error()
+			}
+			statuses[item.Rel] = st
+		}
+		return SyncStatusMsg{Statuses: statuses, Errors: errs}
+	}
+}
+
+// remoteFileState compares a local file against its remote counterpart and
+// returns the matching launch-time status. A size mismatch already proves the
+// content differs, so the (potentially expensive) content hash is only computed
+// when the sizes match.
+func remoteFileState(dbx files.Client, localPath, remotePath string, localSize int64) (UploadStatus, error) {
+	meta, err := dbx.GetMetadata(files.NewGetMetadataArg(remotePath))
+	if err != nil {
+		if isNotFoundErr(err) {
+			return StatusNew, nil
+		}
+		return StatusError, err
+	}
+	fileMeta, ok := meta.(*files.FileMetadata)
+	if !ok {
+		// Remote path is a folder or other non-file; a push would conflict.
+		return StatusModified, nil
+	}
+	if int64(fileMeta.Size) != localSize {
+		return StatusModified, nil
+	}
+	localHash, err := dropboxContentHash(localPath)
+	if err != nil {
+		return StatusError, err
+	}
+	if fileMeta.ContentHash == localHash {
+		return StatusSynced, nil
+	}
+	return StatusModified, nil
 }
 
 // pushFilesCmd uploads each file to the configured remote folder, skipping any

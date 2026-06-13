@@ -13,9 +13,12 @@ import (
 type UploadStatus int
 
 const (
-	StatusPending UploadStatus = iota
-	StatusUploaded
-	StatusSkipped
+	StatusChecking UploadStatus = iota // sync state not yet determined
+	StatusNew                          // not present on the remote
+	StatusSynced                       // present on the remote, identical
+	StatusModified                     // present on the remote, content differs
+	StatusUploaded                     // uploaded during this session
+	StatusSkipped                      // skipped during a push (unchanged)
 	StatusError
 )
 
@@ -34,6 +37,13 @@ type UploadCompleteMsg struct {
 	Uploaded []string
 	Skipped  []string
 	Errors   []string
+}
+
+// SyncStatusMsg carries each file's launch-time sync state, keyed by relative
+// path. Errors holds the message for any file whose check failed.
+type SyncStatusMsg struct {
+	Statuses map[string]UploadStatus
+	Errors   map[string]string
 }
 
 // CollabStatus is the sync state of a collaborator relative to the config.
@@ -135,13 +145,18 @@ func initialManageModel(config *Config, dbox *DboxConfig, cwd string) ManageMode
 	return m
 }
 
-// Init initializes the model. It enters the alt screen and, when collaborators
-// are configured, loads the current membership diff.
+// Init initializes the model. It enters the alt screen, checks which files are
+// already in sync with the remote, and (when configured) loads the
+// collaborator diff.
 func (m ManageModel) Init() tea.Cmd {
-	if m.managesCollaborators() {
-		return tea.Batch(tea.EnterAltScreen, loadCollaboratorsCmd(m.dbox))
+	cmds := []tea.Cmd{tea.EnterAltScreen}
+	if len(m.files) > 0 {
+		cmds = append(cmds, checkSyncStatusCmd(m.dbox, m.files))
 	}
-	return tea.EnterAltScreen
+	if m.managesCollaborators() {
+		cmds = append(cmds, loadCollaboratorsCmd(m.dbox))
+	}
+	return tea.Batch(cmds...)
 }
 
 // Update handles messages and returns the updated model.
@@ -170,6 +185,19 @@ func (m ManageModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("Push complete. Uploaded: %d, Skipped: %d, Errors: %d",
 			len(msg.Uploaded), len(msg.Skipped), len(msg.Errors))
 		m.statusTime = time.Now()
+		return m, nil
+	case SyncStatusMsg:
+		for i := range m.files {
+			// Only resolve files still awaiting their status, so a late result
+			// never clobbers post-push state.
+			if m.files[i].Status != StatusChecking {
+				continue
+			}
+			if st, ok := msg.Statuses[m.files[i].Rel]; ok {
+				m.files[i].Status = st
+				m.files[i].Err = msg.Errors[m.files[i].Rel]
+			}
+		}
 		return m, nil
 	case CollaboratorsLoadedMsg:
 		m.collaborators = msg.Items
@@ -278,6 +306,9 @@ func (m ManageModel) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor = 0
 		m.status = fmt.Sprintf("rescanned: %d file(s)", len(files))
 		m.statusTime = time.Now()
+		if len(files) > 0 {
+			return m, checkSyncStatusCmd(m.dbox, files)
+		}
 	case "P":
 		if len(m.files) == 0 {
 			return m, func() tea.Msg { return StatusMsg{Message: "nothing to push"} }
@@ -429,18 +460,29 @@ func collabLabel(status CollabStatus) (marker, label, color string) {
 // statusLabel returns the display label and lipgloss color for a file's status.
 func statusLabel(file ManageFileItem) (string, string) {
 	switch file.Status {
+	case StatusChecking:
+		return "checking…", "240"
+	case StatusNew:
+		return "new", ""
+	case StatusSynced:
+		return "✓ in sync", "156"
+	case StatusModified:
+		return "● modified", "214"
 	case StatusUploaded:
 		return "✓ uploaded", "156"
 	case StatusSkipped:
 		return "↷ skipped (unchanged)", "156"
 	case StatusError:
 		msg := file.Err
+		if msg == "" {
+			return "✗ error", "203"
+		}
 		if i := strings.Index(msg, ":"); i >= 0 {
 			msg = strings.TrimSpace(msg[i+1:])
 		}
 		return "✗ error: " + msg, "203"
 	default:
-		return "pending", ""
+		return "", ""
 	}
 }
 
