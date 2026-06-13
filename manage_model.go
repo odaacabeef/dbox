@@ -36,6 +36,36 @@ type UploadCompleteMsg struct {
 	Errors   []string
 }
 
+// CollabStatus is the sync state of a collaborator relative to the config.
+type CollabStatus int
+
+const (
+	CollabOwner    CollabStatus = iota // folder owner (never changed)
+	CollabInSync                       // in config and on the folder
+	CollabToAdd                        // in config, not yet on the folder
+	CollabToRemove                     // on the folder, not in config
+)
+
+// CollaboratorItem is a single row in the collaborators diff.
+type CollaboratorItem struct {
+	Email  string
+	Status CollabStatus
+}
+
+// CollaboratorsLoadedMsg carries the current collaborator diff. Shared reports
+// whether the remote folder is a shared folder yet.
+type CollaboratorsLoadedMsg struct {
+	Items  []CollaboratorItem
+	Shared bool
+}
+
+// ReconcileCompleteMsg reports the result of reconciling collaborators.
+type ReconcileCompleteMsg struct {
+	Added   []string
+	Removed []string
+	Errors  []string
+}
+
 // ManageModel is the management-mode TUI: it lists the local files matching the
 // config and pushes them to Dropbox on demand.
 type ManageModel struct {
@@ -52,10 +82,22 @@ type ManageModel struct {
 	pushing  bool
 	showHelp bool
 
+	// Collaborator management (only active when the config lists collaborators).
+	collaborators []CollaboratorItem
+	collabLoading bool
+	collabShared  bool
+	reconciling   bool
+
 	status     string
 	statusTime time.Time
 	error      string
 	errorTime  time.Time
+}
+
+// managesCollaborators reports whether the config opts into collaborator
+// management. An empty list disables it (so it can't mean "remove everyone").
+func (m ManageModel) managesCollaborators() bool {
+	return len(m.dbox.Collaborators) > 0
 }
 
 // initialManageModel scans the working directory and builds the model.
@@ -77,13 +119,15 @@ func initialManageModel(config *Config, dbox *DboxConfig, cwd string) ManageMode
 		m.files = files
 	}
 
+	m.collabLoading = m.managesCollaborators()
+
 	switch {
 	case m.error != "":
 		// keep the scan error
 	case len(m.files) == 0:
 		m.status = fmt.Sprintf("no files matching %s in %s", strings.Join(dbox.FileTypes, ", "), cwd)
-	case len(dbox.Collaborators) > 0:
-		m.status = "collaborator management not yet implemented; press P to push files"
+	case m.managesCollaborators():
+		m.status = "press P to push files · C to reconcile collaborators"
 	default:
 		m.status = "press P to push files"
 	}
@@ -91,8 +135,12 @@ func initialManageModel(config *Config, dbox *DboxConfig, cwd string) ManageMode
 	return m
 }
 
-// Init initializes the model.
+// Init initializes the model. It enters the alt screen and, when collaborators
+// are configured, loads the current membership diff.
 func (m ManageModel) Init() tea.Cmd {
+	if m.managesCollaborators() {
+		return tea.Batch(tea.EnterAltScreen, loadCollaboratorsCmd(m.dbox))
+	}
 	return tea.EnterAltScreen
 }
 
@@ -111,6 +159,8 @@ func (m ManageModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case ErrorMsg:
 		m.pushing = false
+		m.reconciling = false
+		m.collabLoading = false
 		m.error = msg.Error
 		m.errorTime = time.Now()
 		return m, nil
@@ -121,6 +171,23 @@ func (m ManageModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			len(msg.Uploaded), len(msg.Skipped), len(msg.Errors))
 		m.statusTime = time.Now()
 		return m, nil
+	case CollaboratorsLoadedMsg:
+		m.collaborators = msg.Items
+		m.collabShared = msg.Shared
+		m.collabLoading = false
+		return m, nil
+	case ReconcileCompleteMsg:
+		m.reconciling = false
+		m.status = fmt.Sprintf("Collaborators reconciled. Added: %d, Removed: %d, Errors: %d",
+			len(msg.Added), len(msg.Removed), len(msg.Errors))
+		m.statusTime = time.Now()
+		if len(msg.Errors) > 0 {
+			m.error = strings.Join(msg.Errors, "; ")
+			m.errorTime = time.Now()
+		}
+		// Refresh the diff to reflect the new state.
+		m.collabLoading = true
+		return m, loadCollaboratorsCmd(m.dbox)
 	}
 	return m, nil
 }
@@ -165,8 +232,9 @@ func toSet(items []string) map[string]bool {
 
 // handleKeyPress processes keyboard input.
 func (m ManageModel) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// While pushing, ignore everything so the in-flight upload isn't disturbed.
-	if m.pushing {
+	// While a push or reconcile is in flight, ignore everything so the
+	// operation isn't disturbed.
+	if m.pushing || m.reconciling {
 		return m, nil
 	}
 	// While help is open, only allow closing it or quitting.
@@ -216,6 +284,15 @@ func (m ManageModel) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.pushing = true
 		return m, pushFilesCmd(m.dbox, m.files)
+	case "C":
+		if !m.managesCollaborators() {
+			return m, func() tea.Msg { return StatusMsg{Message: "no collaborators configured"} }
+		}
+		if m.collabLoading {
+			return m, nil // wait for the current diff to finish loading
+		}
+		m.reconciling = true
+		return m, reconcileCollaboratorsCmd(m.dbox)
 	}
 	return m, nil
 }
@@ -224,6 +301,9 @@ func (m ManageModel) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m ManageModel) View() string {
 	if m.pushing {
 		return "📤 Pushing...\n"
+	}
+	if m.reconciling {
+		return "🔧 Reconciling collaborators...\n"
 	}
 	if m.width == 0 {
 		return "Loading..."
@@ -246,6 +326,10 @@ func (m ManageModel) View() string {
 		s.WriteString("🪹 No matching files\n")
 	} else {
 		s.WriteString(m.renderFileList())
+	}
+
+	if m.managesCollaborators() {
+		s.WriteString("\n" + m.renderCollaborators())
 	}
 
 	// Status/Error line, matching the browse model's behavior.
@@ -298,6 +382,48 @@ func (m ManageModel) renderFileList() string {
 	}
 
 	return s.String()
+}
+
+// renderCollaborators renders the collaborator diff section.
+func (m ManageModel) renderCollaborators() string {
+	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+
+	var s strings.Builder
+	s.WriteString(headerStyle.Render("collaborators (editor):") + "\n")
+
+	if m.collabLoading {
+		s.WriteString(headerStyle.Render("  loading…") + "\n")
+		return s.String()
+	}
+	if len(m.collaborators) == 0 {
+		s.WriteString(headerStyle.Render("  (none)") + "\n")
+		return s.String()
+	}
+
+	for _, c := range m.collaborators {
+		marker, label, color := collabLabel(c.Status)
+		style := lipgloss.NewStyle()
+		if color != "" {
+			style = style.Foreground(lipgloss.Color(color))
+		}
+		line := fmt.Sprintf("  %s %-36s %s", marker, c.Email, label)
+		s.WriteString(style.Render(line) + "\n")
+	}
+	return s.String()
+}
+
+// collabLabel returns the marker, label, and color for a collaborator status.
+func collabLabel(status CollabStatus) (marker, label, color string) {
+	switch status {
+	case CollabOwner:
+		return "👑", "owner", "240"
+	case CollabToAdd:
+		return "+", "to add", "156"
+	case CollabToRemove:
+		return "−", "to remove (not in config)", "203"
+	default: // CollabInSync
+		return "✓", "in sync", "156"
+	}
 }
 
 // statusLabel returns the display label and lipgloss color for a file's status.
@@ -361,6 +487,7 @@ func (m ManageModel) renderHelpView() string {
 			title: "Actions",
 			bindings: []binding{
 				{"P", "push files to Dropbox"},
+				{"C", "reconcile collaborators (make remote match config)"},
 				{"R", "rescan the local folder"},
 			},
 		},

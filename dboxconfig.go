@@ -73,6 +73,20 @@ func (c *DboxConfig) normalizeAndValidate() error {
 	}
 	c.FileTypes = types
 
+	// Collaborators are optional. Normalize emails (lowercase, trimmed) and
+	// drop blanks/duplicates so the remote/local diff is case-insensitive.
+	var collaborators []string
+	seen := make(map[string]bool)
+	for _, email := range c.Collaborators {
+		email = strings.ToLower(strings.TrimSpace(email))
+		if email == "" || seen[email] {
+			continue
+		}
+		seen[email] = true
+		collaborators = append(collaborators, email)
+	}
+	c.Collaborators = collaborators
+
 	return nil
 }
 

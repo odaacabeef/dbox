@@ -46,8 +46,10 @@ the app's **Permissions** tab, then regenerate the token):
 | --- | --- |
 | Browse / download | `files.metadata.read`, `files.content.read` |
 | Management (push) | the above plus `files.content.write` |
+| Management (collaborators) | the above plus `sharing.read`, `sharing.write` |
 
-A read-only token works for browsing but will fail when pushing.
+A read-only token works for browsing but will fail when pushing or managing
+collaborators.
 
 ## Browse mode
 
@@ -96,6 +98,9 @@ The config file describes where files go and which ones to include:
 # dbox.yaml
 remote: /sequences/airy-dissonance   # remote Dropbox folder (created if needed)
 file_types: [wav]                    # only files with these extensions are pushed
+collaborators:                       # optional; see "Collaborators" below
+  - alice@example.com
+  - bob@example.com
 ```
 
 On launch, `dbox` lists the matching files in the current directory and its
@@ -118,6 +123,32 @@ The remote folder is created if it doesn't already exist.
 | `g` | Jump to top |
 | `G` | Jump to bottom |
 | `P` | Push files to Dropbox |
+| `C` | Reconcile collaborators (make remote match config) |
 | `R` | Rescan the local folder |
 | `?` | Toggle help |
 | `q` / `ctrl+c` | Quit |
+
+### Collaborators
+
+If the config includes a `collaborators` list, management mode also manages who
+the folder is shared with, treating the config as the **source of truth**. On
+launch it shows the difference between the configured collaborators and the
+folder's actual Dropbox members:
+
+- `+ to add` — in the config but not yet on the folder
+- `✓ in sync` — in both
+- `− to remove` — on the folder but not in the config
+- `👑 owner` — you; never changed
+
+Pressing `C` reconciles the folder to match the config: it shares the folder if
+needed, invites anyone missing as an **editor** (Dropbox emails them an invite),
+and **removes anyone who isn't listed**. Because removals affect other people's
+access, the diff is always shown before you press `C`, and reconciling happens
+immediately when you do.
+
+Notes:
+
+- The folder owner is never removed, even if not in the list.
+- An empty or omitted `collaborators` list disables this entirely — it is never
+  interpreted as "remove everyone."
+- Collaborators who have access via a Dropbox group are not managed here.
