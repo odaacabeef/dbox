@@ -139,6 +139,44 @@ func remoteOnlyFiles(dbx files.Client, cfg *DboxConfig, localRel map[string]bool
 	return out
 }
 
+// downloadRemoteFileCmd downloads a remote-only file into the local folder at
+// the matching relative path, creating parent directories as needed. The file
+// is streamed to disk so large files don't load into memory.
+func downloadRemoteFileCmd(cfg *DboxConfig, cwd string, item ManageFileItem) tea.Cmd {
+	return func() tea.Msg {
+		dbx, err := newFilesClient()
+		if err != nil {
+			return RemoteDownloadedMsg{Rel: item.Rel, Err: err.Error()}
+		}
+
+		remotePath := cfg.Remote + "/" + item.Rel
+		localPath := filepath.Join(cwd, filepath.FromSlash(item.Rel))
+		if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+			return RemoteDownloadedMsg{Rel: item.Rel, Err: err.Error()}
+		}
+
+		_, contents, err := dbx.Download(files.NewDownloadArg(remotePath))
+		if err != nil {
+			return RemoteDownloadedMsg{Rel: item.Rel, Err: fmt.Sprintf("download failed: %v", err)}
+		}
+		defer contents.Close()
+
+		out, err := os.Create(localPath)
+		if err != nil {
+			return RemoteDownloadedMsg{Rel: item.Rel, Err: err.Error()}
+		}
+		if _, err := io.Copy(out, contents); err != nil {
+			out.Close()
+			return RemoteDownloadedMsg{Rel: item.Rel, Err: fmt.Sprintf("write failed: %v", err)}
+		}
+		if err := out.Close(); err != nil {
+			return RemoteDownloadedMsg{Rel: item.Rel, Err: fmt.Sprintf("write failed: %v", err)}
+		}
+
+		return RemoteDownloadedMsg{Rel: item.Rel}
+	}
+}
+
 // remoteFileState compares a local file against its remote counterpart and
 // returns the matching launch-time status. A size mismatch already proves the
 // content differs, so the (potentially expensive) content hash is only computed

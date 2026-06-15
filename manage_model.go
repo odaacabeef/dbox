@@ -50,6 +50,13 @@ type SyncStatusMsg struct {
 	RemoteOnly []ManageFileItem
 }
 
+// RemoteDownloadedMsg reports the result of downloading a remote-only file into
+// the local folder. Err is empty on success.
+type RemoteDownloadedMsg struct {
+	Rel string
+	Err string
+}
+
 // CollabStatus is the sync state of a collaborator relative to the config.
 type CollabStatus int
 
@@ -93,8 +100,9 @@ type ManageModel struct {
 	width  int
 	height int
 
-	pushing  bool
-	showHelp bool
+	pushing     bool
+	downloading bool
+	showHelp    bool
 
 	// Collaborator management (only active when the config lists collaborators).
 	collaborators []CollaboratorItem
@@ -179,9 +187,35 @@ func (m ManageModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ErrorMsg:
 		m.pushing = false
 		m.reconciling = false
+		m.downloading = false
 		m.collabLoading = false
 		m.error = msg.Error
 		m.errorTime = time.Now()
+		return m, nil
+	case RemoteDownloadedMsg:
+		m.downloading = false
+		if msg.Err != "" {
+			m.error = fmt.Sprintf("%s: %s", msg.Rel, msg.Err)
+			m.errorTime = time.Now()
+			return m, nil
+		}
+		m.status = fmt.Sprintf("Downloaded %s", msg.Rel)
+		m.statusTime = time.Now()
+		// The file is now local; rescan so it moves from "remote only" to a
+		// local entry and gets a fresh sync status.
+		files, err := scanLocalFiles(m.cwd, m.dbox)
+		if err != nil {
+			m.error = fmt.Sprintf("Failed to scan %s: %v", m.cwd, err)
+			m.errorTime = time.Now()
+			return m, nil
+		}
+		m.files = files
+		if m.cursor >= len(m.files) {
+			m.cursor = max(0, len(m.files)-1)
+		}
+		if len(files) > 0 {
+			return m, checkSyncStatusCmd(m.dbox, files)
+		}
 		return m, nil
 	case UploadCompleteMsg:
 		m.pushing = false
@@ -279,9 +313,9 @@ func toSet(items []string) map[string]bool {
 
 // handleKeyPress processes keyboard input.
 func (m ManageModel) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// While a push or reconcile is in flight, ignore everything so the
-	// operation isn't disturbed.
-	if m.pushing || m.reconciling {
+	// While a push, reconcile, or download is in flight, ignore everything so
+	// the operation isn't disturbed.
+	if m.pushing || m.reconciling || m.downloading {
 		return m, nil
 	}
 	// While help is open, only allow closing it or quitting.
@@ -344,6 +378,16 @@ func (m ManageModel) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.reconciling = true
 		return m, reconcileCollaboratorsCmd(m.dbox)
+	case "d":
+		if m.cursor >= len(m.files) {
+			return m, nil
+		}
+		file := m.files[m.cursor]
+		if file.Status != StatusRemoteOnly {
+			return m, func() tea.Msg { return StatusMsg{Message: "only remote-only files can be downloaded"} }
+		}
+		m.downloading = true
+		return m, downloadRemoteFileCmd(m.dbox, m.cwd, file)
 	}
 	return m, nil
 }
@@ -352,6 +396,9 @@ func (m ManageModel) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m ManageModel) View() string {
 	if m.pushing {
 		return "📤 Pushing...\n"
+	}
+	if m.downloading {
+		return "📥 Downloading...\n"
 	}
 	if m.reconciling {
 		return "🔧 Reconciling collaborators...\n"
@@ -563,6 +610,7 @@ func (m ManageModel) renderHelpView() string {
 			title: "Actions",
 			bindings: []binding{
 				{"P", "push files to Dropbox"},
+				{"d", "download the file under the cursor (remote-only files)"},
 				{"C", "reconcile collaborators (make remote match config)"},
 				{"R", "rescan the local folder"},
 			},

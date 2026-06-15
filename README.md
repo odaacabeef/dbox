@@ -129,8 +129,9 @@ Each file is checked against the remote and shows its sync state: `✓ in sync`
 (already uploaded, identical), `● modified` (on the remote but changed locally),
 or `new` (not on the remote yet). Files of the configured types that exist on
 the remote but not locally appear in the list in gray as `remote only`; they're
-shown for awareness and are never part of a push. The list is sorted
-alphabetically. Press `P` to push the local files. For each file:
+never part of a push, but you can pull one into the local folder by moving the
+cursor onto it and pressing `d`. The list is sorted alphabetically. Press `P` to
+push the local files. For each file:
 
 - If the same content already exists at the remote path it is **skipped** —
   comparison uses Dropbox's content hash, so re-running only uploads what
@@ -147,6 +148,7 @@ The remote folder is created if it doesn't already exist.
 | `g` | Jump to top |
 | `G` | Jump to bottom |
 | `P` | Push files to Dropbox |
+| `d` | Download the file under the cursor (remote-only files) |
 | `C` | Reconcile collaborators (make remote match config) |
 | `R` | Rescan the local folder |
 | `?` | Toggle help |
